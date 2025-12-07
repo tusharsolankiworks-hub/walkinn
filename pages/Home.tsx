@@ -1,12 +1,63 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { PRODUCTS, CATEGORIES } from '../constants';
 import ProductCard from '../components/ProductCard';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Loader } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
+import { Product } from '../types';
 
 const Home: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const location = useLocation();
+
+  // Fetch products from Supabase
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .order('id', { ascending: true });
+        
+        if (error) {
+          // Check for "table not found" errors
+          const isTableMissing = 
+            error.code === '42P01' || 
+            (error.message && error.message.includes('Could not find the table'));
+
+          // Check for network errors (Failed to fetch)
+          const isNetworkError = 
+            error.message && 
+            (error.message.includes('Failed to fetch') || error.message.includes('Network request failed'));
+
+          if (isTableMissing) {
+            console.warn("Table 'products' not found in Supabase. Falling back to local data. Please run schema.sql.");
+          } else if (isNetworkError) {
+            console.warn("Connection to Supabase failed (Network Error). Using local fallback data.");
+          } else {
+            console.error("Supabase error:", error.message, error.details);
+          }
+          throw error;
+        }
+
+        if (data && data.length > 0) {
+          setProducts(data);
+        } else {
+          console.log("Supabase table empty, using local fallback");
+          setProducts(PRODUCTS);
+        }
+      } catch (error) {
+        // Fallback to local data for ANY error (table missing, network fail, etc)
+        setProducts(PRODUCTS); 
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchProducts();
+  }, []);
 
   // Handle scroll to section if navigated with state (e.g. from Navbar)
   useEffect(() => {
@@ -19,13 +70,13 @@ const Home: React.FC = () => {
         }
       }, 100);
     }
-  }, [location]);
+  }, [location, loading]);
 
   const filteredProducts = useMemo(() => {
     return selectedCategory === "All"
-      ? PRODUCTS
-      : PRODUCTS.filter(p => p.category === selectedCategory);
-  }, [selectedCategory]);
+      ? products
+      : products.filter(p => p.category === selectedCategory);
+  }, [selectedCategory, products]);
 
   return (
     <div className="bg-white min-h-screen">
@@ -91,13 +142,19 @@ const Home: React.FC = () => {
         </div>
 
         {/* Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-          {filteredProducts.map(product => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <Loader className="animate-spin text-brand-600" size={48} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+            {filteredProducts.map(product => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
 
-        {filteredProducts.length === 0 && (
+        {!loading && filteredProducts.length === 0 && (
           <div className="text-center py-20">
             <p className="text-gray-500 text-lg">No products found in this category.</p>
             <button

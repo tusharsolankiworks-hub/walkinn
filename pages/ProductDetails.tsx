@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PRODUCTS } from '../constants';
 import { useCart } from '../context/CartContext';
-import { Star, Truck, Shield, ArrowLeft, Check } from 'lucide-react';
+import { Star, Truck, Shield, ArrowLeft, Check, Loader } from 'lucide-react';
 import { Product } from '../types';
+import { supabase } from '../supabaseClient';
 
 const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -12,15 +13,52 @@ const ProductDetails: React.FC = () => {
   const [product, setProduct] = useState<Product | null>(null);
   const [selectedSize, setSelectedSize] = useState<number | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const found = PRODUCTS.find(p => p.id === Number(id));
-    if (found) {
-      setProduct(found);
-      if (found.sizes.length > 0) setSelectedSize(found.sizes[0]);
-    } else {
-      navigate('/');
+    async function fetchProduct() {
+      if (!id) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (error) {
+           const isTableMissing = error.code === '42P01' || (error.message && error.message.includes('Could not find the table'));
+           const isNetworkError = error.message && (error.message.includes('Failed to fetch') || error.message.includes('Network request failed'));
+
+           // Only log unexpected errors
+           if (!isTableMissing && !isNetworkError) {
+             console.error("Supabase error fetching product details:", error.message);
+           }
+           
+           throw error; // Throwing here triggers the catch block below which handles the fallback
+        }
+
+        if (data) {
+          setProduct(data);
+          if (data.sizes && data.sizes.length > 0) setSelectedSize(data.sizes[0]);
+        } else {
+           throw new Error("Product not found in DB");
+        }
+      } catch (e) {
+        // Fallback to local constants for any error (network, missing table, etc)
+        const found = PRODUCTS.find(p => p.id === Number(id));
+        if (found) {
+          setProduct(found);
+          if (found.sizes.length > 0) setSelectedSize(found.sizes[0]);
+        } else {
+          navigate('/');
+        }
+      } finally {
+        setLoading(false);
+      }
     }
+    
+    fetchProduct();
   }, [id, navigate]);
 
   const handleAddToCart = () => {
@@ -31,7 +69,11 @@ const ProductDetails: React.FC = () => {
     }
   };
 
-  if (!product) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-600"></div></div>;
+  if (loading) {
+     return <div className="min-h-screen flex items-center justify-center"><Loader className="animate-spin text-brand-600" size={48} /></div>;
+  }
+
+  if (!product) return <div className="min-h-screen flex items-center justify-center">Product not found</div>;
 
   return (
     <div className="min-h-screen bg-white py-12">
